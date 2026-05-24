@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 
+/** blob: URL を安全に revoke する */
+const revokeBlobUrl = (url: string | null): void => {
+  if (url?.startsWith('blob:')) URL.revokeObjectURL(url)
+}
+
 export type VideoBackdropState = {
   readonly videoUrl: string | null
   readonly videoFile: File | null
@@ -89,14 +94,14 @@ export const useVideoBackdrop = (): VideoBackdropState => {
 
   useEffect(
     () => () => {
-      if (videoUrl) URL.revokeObjectURL(videoUrl)
+      revokeBlobUrl(videoUrl)
     },
     [videoUrl],
   )
 
   useEffect(
     () => () => {
-      if (frameUrl?.startsWith('blob:')) URL.revokeObjectURL(frameUrl)
+      revokeBlobUrl(frameUrl)
     },
     [frameUrl],
   )

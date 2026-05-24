@@ -191,10 +191,10 @@ export const resolveSafeGifParams = (
       maxDurationSec: Math.min(meta.durationSec, 5),
     }
 
-  const wasClamped =
-    resolved.frameRate !== requested.frameRate
-    || resolved.scale !== requested.scale
-    || resolved.maxDurationSec < meta.durationSec - 0.01
+  const frameRateChanged = resolved.frameRate !== requested.frameRate
+  const scaleChanged = resolved.scale !== requested.scale
+  const durationClamped = resolved.maxDurationSec < meta.durationSec - 0.01
+  const wasClamped = frameRateChanged || scaleChanged || durationClamped
 
   return {
     frameRate: resolved.frameRate,
@@ -230,55 +230,49 @@ const buildScaleFilter = (frameRate: number, scale: number): string =>
 const buildPaletteGenFilter = (): string =>
   'palettegen=stats_mode=single:max_colors=256'
 
-/**
- * 2-pass GIF 変換計画を組み立てる。大きい入力は two-pass、小さい入力は single-pass。
- */
-export const buildGifConvertPlan = (
-  requested: ConvertParams,
-  meta: VideoMeta,
-  budgetBytes: number = FFMPEG_WASM_HEAP_BUDGET_BYTES,
-): GifConvertPlan => {
-  const params = resolveSafeGifParams(requested, meta, budgetBytes)
-  const durationArgs = buildDurationArgs(params.maxDurationSec)
-  const scaleFilter = buildScaleFilter(params.frameRate, params.scale)
-  const mode = resolveConvertMode(meta, params.scale, budgetBytes)
-  const memoryInput = {
-    sourceWidth: meta.width,
-    sourceHeight: meta.height,
-    outputWidth: params.scale,
+type PlanBuildInput = {
+  readonly params: SafeGifConvertParams
+  readonly durationArgs: readonly string[]
+  readonly scaleFilter: string
+  readonly memoryInput: {
+    readonly sourceWidth: number
+    readonly sourceHeight: number
+    readonly outputWidth: number
+  }
+}
+
+const buildSinglePassPlan = (input: PlanBuildInput): GifConvertPlan => {
+  const gifPass: GifConvertPass = {
+    args: [
+      '-i',
+      'input.mp4',
+      '-an',
+      ...input.durationArgs,
+      '-lavfi',
+      `${input.scaleFilter},split[s0][s1];[s0]${buildPaletteGenFilter()}[s2];[s1][s2]paletteuse=dither=${input.params.dither}`,
+      '-y',
+      'output.gif',
+    ],
   }
 
-  if (mode === 'single-pass') {
-    const gifPass: GifConvertPass = {
-      args: [
-        '-i',
-        'input.mp4',
-        '-an',
-        ...durationArgs,
-        '-lavfi',
-        `${scaleFilter},split[s0][s1];[s0]${buildPaletteGenFilter()}[s2];[s1][s2]paletteuse=dither=${params.dither}`,
-        '-y',
-        'output.gif',
-      ],
-    }
-
-    return {
-      params,
-      mode,
-      palettePass: null,
-      gifPass,
-      estimatedPeakBytes: estimateSinglePassPeakBytes(memoryInput),
-    }
+  return {
+    params: input.params,
+    mode: 'single-pass',
+    palettePass: null,
+    gifPass,
+    estimatedPeakBytes: estimateSinglePassPeakBytes(input.memoryInput),
   }
+}
 
+const buildTwoPassPlan = (input: PlanBuildInput): GifConvertPlan => {
   const palettePass: GifConvertPass = {
     args: [
       '-i',
       'input.mp4',
       '-an',
-      ...durationArgs,
+      ...input.durationArgs,
       '-vf',
-      `${scaleFilter},${buildPaletteGenFilter()}`,
+      `${input.scaleFilter},${buildPaletteGenFilter()}`,
       '-y',
       'palette.png',
     ],
@@ -291,21 +285,49 @@ export const buildGifConvertPlan = (
       '-i',
       'palette.png',
       '-an',
-      ...durationArgs,
+      ...input.durationArgs,
       '-lavfi',
-      `${scaleFilter}[x];[x][1:v]paletteuse=dither=${params.dither}`,
+      `${input.scaleFilter}[x];[x][1:v]paletteuse=dither=${input.params.dither}`,
       '-y',
       'output.gif',
     ],
   }
 
   return {
-    params,
-    mode,
+    params: input.params,
+    mode: 'two-pass',
     palettePass,
     gifPass,
-    estimatedPeakBytes: estimateTwoPassPeakBytes(memoryInput),
+    estimatedPeakBytes: estimateTwoPassPeakBytes(input.memoryInput),
   }
+}
+
+/**
+ * 2-pass GIF 変換計画を組み立てる。大きい入力は two-pass、小さい入力は single-pass。
+ */
+export const buildGifConvertPlan = (
+  requested: ConvertParams,
+  meta: VideoMeta,
+  budgetBytes: number = FFMPEG_WASM_HEAP_BUDGET_BYTES,
+): GifConvertPlan => {
+  const params = resolveSafeGifParams(requested, meta, budgetBytes)
+  const durationArgs = buildDurationArgs(params.maxDurationSec)
+  const scaleFilter = buildScaleFilter(params.frameRate, params.scale)
+  const mode = resolveConvertMode(meta, params.scale, budgetBytes)
+  const planInput: PlanBuildInput = {
+    params,
+    durationArgs,
+    scaleFilter,
+    memoryInput: {
+      sourceWidth: meta.width,
+      sourceHeight: meta.height,
+      outputWidth: params.scale,
+    },
+  }
+
+  return mode === 'single-pass'
+    ? buildSinglePassPlan(planInput)
+    : buildTwoPassPlan(planInput)
 }
 
 /**

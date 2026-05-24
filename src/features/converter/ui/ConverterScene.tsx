@@ -1,11 +1,9 @@
 import { useRef, useState, type CSSProperties } from 'react'
 import {
   Background,
-  HStack,
   Html,
   LiquidCanvas,
   Padding,
-  VStack,
   ZStack,
 } from '@liquid-dom/react'
 import { UnsupportedScreen } from '../../../app/UnsupportedScreen'
@@ -13,24 +11,16 @@ import type { FfmpegConvertState } from '../hooks/useFfmpegConvert'
 import { useSafeMaxDpr } from '../hooks/useSafeMaxDpr'
 import { isViewportReady, useCanvasHostSize, useWideLayout } from '../hooks/useLayoutMedia'
 import type { VideoBackdropState } from '../hooks/useVideoBackdrop'
-import {
-  computeNarrowCanvasHeight,
-  computePanelWidth,
-} from '../lib/computeSceneLayout'
+import { resolveConverterSceneLayout } from '../lib/computeSceneLayout'
 import { BackdropContent } from './BackdropContent'
-import { CenterPeek } from './CenterPeek'
-import { ConvertPanel } from './ConvertPanel'
 import { ConvertingOverlay, ConvertingOverlayPortal } from './ConvertingOverlay'
-import { ResultPanel } from './ResultPanel'
+import { ScenePanelStack } from './ScenePanelStack'
 import './converter.css'
 
 type ConverterSceneProps = {
   readonly backdrop: VideoBackdropState
   readonly convertState: FfmpegConvertState
 }
-
-/** liquid-dom syncCanvasSize が backing store 寸法を canvas 属性に書くため、CSS 表示サイズをホストに固定する */
-const LIQUID_CANVAS_FILL_STYLE: CSSProperties = { width: '100%', height: '100%' }
 
 /** liquid-dom Renderer が生成する canvas の CSS 表示サイズ。属性 width/height とのフィードバックループを防ぐ */
 const LIQUID_CANVAS_ELEMENT_STYLE: CSSProperties = { width: '100%', height: '100%', display: 'block' }
@@ -48,34 +38,24 @@ export const ConverterScene = ({ backdrop, convertState }: ConverterSceneProps) 
     return <UnsupportedScreen reason={renderError} />
   }
 
-  const panelWidth = computePanelWidth(canvasLayout.width, wide)
-  const canvasHeight = wide ? canvasLayout.height : computeNarrowCanvasHeight()
-  const canvasWidth = canvasLayout.width
-
-  const hostStyle: CSSProperties = wide
-    ? { width: '100%', height: '100%' }
-    : { width: '100%', minHeight: '100vh', height: canvasHeight }
-
-  const liquidCanvasStyle: CSSProperties = wide
-    ? LIQUID_CANVAS_FILL_STYLE
-    : { width: '100%', height: canvasHeight }
+  const sceneLayout = resolveConverterSceneLayout(canvasLayout, wide)
 
   const liquidCanvasKey = layoutReady
-    ? `${canvasWidth}x${canvasHeight}x${safeMaxDpr}x${wide ? 'wide' : 'narrow'}`
+    ? `${sceneLayout.canvasWidth}x${sceneLayout.canvasHeight}x${safeMaxDpr}x${sceneLayout.liquidCanvasKeySuffix}`
     : 'pending'
 
   return (
     <div
       ref={hostRef}
-      className={wide ? 'converter-scene-host' : 'converter-scene-host converter-scene-host--narrow'}
-      style={hostStyle}
+      className={sceneLayout.hostClassName}
+      style={sceneLayout.hostStyle}
     >
       {layoutReady ? (
         <LiquidCanvas
           key={liquidCanvasKey}
-          style={liquidCanvasStyle}
+          style={sceneLayout.liquidCanvasStyle}
           canvasStyle={LIQUID_CANVAS_ELEMENT_STYLE}
-          proposal={{ width: canvasWidth, height: canvasHeight }}
+          proposal={{ width: sceneLayout.canvasWidth, height: sceneLayout.canvasHeight }}
           maxDpr={safeMaxDpr}
           onError={(error: unknown) => {
             const message =
@@ -83,7 +63,7 @@ export const ConverterScene = ({ backdrop, convertState }: ConverterSceneProps) 
             setRenderError(message)
           }}
         >
-          <ZStack alignment={wide ? 'center' : 'top'}>
+          <ZStack alignment={sceneLayout.stackAlignment}>
             <Background
               background={
                 <Html sizing="fill">
@@ -92,53 +72,30 @@ export const ConverterScene = ({ backdrop, convertState }: ConverterSceneProps) 
               }
             >
               <Padding insets={24}>
-                {wide ? (
-                  <HStack spacing={28} alignment="center">
-                    <ConvertPanel
-                      backdrop={backdrop}
-                      convertState={convertState}
-                      panelWidth={panelWidth}
-                    />
-                    <CenterPeek backdrop={backdrop} />
-                    <ResultPanel
-                      backdrop={backdrop}
-                      convertState={convertState}
-                      panelWidth={panelWidth}
-                    />
-                  </HStack>
-                ) : (
-                  <VStack spacing={24} alignment="center">
-                    <ConvertPanel
-                      backdrop={backdrop}
-                      convertState={convertState}
-                      panelWidth={panelWidth}
-                    />
-                    <CenterPeek backdrop={backdrop} compact panelWidth={panelWidth} />
-                    <ResultPanel
-                      backdrop={backdrop}
-                      convertState={convertState}
-                      panelWidth={panelWidth}
-                    />
-                  </VStack>
-                )}
+                <ScenePanelStack
+                  wide={wide}
+                  backdrop={backdrop}
+                  convertState={convertState}
+                  panelWidth={sceneLayout.panelWidth}
+                />
               </Padding>
             </Background>
 
-            {wide ? (
+            {sceneLayout.showInCanvasOverlay ? (
               <ConvertingOverlay
                 convertState={convertState}
-                viewportWidth={canvasWidth}
-                viewportHeight={canvasHeight}
+                viewportWidth={sceneLayout.canvasWidth}
+                viewportHeight={sceneLayout.canvasHeight}
               />
             ) : null}
           </ZStack>
         </LiquidCanvas>
       ) : null}
 
-      {!wide ? (
+      {sceneLayout.showPortalOverlay ? (
         <ConvertingOverlayPortal
           convertState={convertState}
-          panelWidth={panelWidth}
+          panelWidth={sceneLayout.panelWidth}
         />
       ) : null}
     </div>

@@ -129,11 +129,18 @@ export const OVERLAY_SCRIM_GLASS_PROPS = {
   pointerEvents: true as const,
 }
 
-/** パネルの固定幅 (px) */
-export const PANEL_WIDTH = 380
+/** 変換中 progress カードの Liquid Frame 寸法 (px) */
+export const OVERLAY_PROGRESS_CARD_WIDTH = 360
+export const OVERLAY_PROGRESS_CARD_HEIGHT = 168
+
+/** 変換中 progress カードの最大幅 (px) — ナローポータルでもこの値を上限とする */
+export const OVERLAY_PROGRESS_CARD_MAX_WIDTH = 360
 
 /** ワイドレイアウト中央の Backdrop 露出幅 (px) */
 export const CENTER_PEEK_WIDTH = 280
+
+/** パネルの固定幅 (px) */
+export const PANEL_WIDTH = 380
 
 /** パネルの最小高さ (px) */
 export const PANEL_MIN_HEIGHT = 480

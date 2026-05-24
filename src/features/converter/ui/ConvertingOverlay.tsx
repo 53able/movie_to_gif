@@ -11,6 +11,9 @@ import {
   GLASS_SHAPE_PROPS,
   OVERLAY_CARD_GLASS_PROPS,
   OVERLAY_GLASS_PROPS,
+  OVERLAY_PROGRESS_CARD_HEIGHT,
+  OVERLAY_PROGRESS_CARD_MAX_WIDTH,
+  OVERLAY_PROGRESS_CARD_WIDTH,
   OVERLAY_SCRIM_GLASS_PROPS,
 } from '../types'
 import { ConvertingProgressCard } from './ConvertingProgressCard'
@@ -42,7 +45,7 @@ export const ConvertingOverlay = ({
         </GlassContainer>
       </Frame>
 
-      <Frame width={360} height={168}>
+      <Frame width={OVERLAY_PROGRESS_CARD_WIDTH} height={OVERLAY_PROGRESS_CARD_HEIGHT}>
         <GlassContainer {...OVERLAY_CARD_GLASS_PROPS}>
           <Glass {...GLASS_SHAPE_PROPS}>
             <Html sizing="fill">
@@ -73,7 +76,7 @@ export const ConvertingOverlayPortal = ({
   return (
     <div
       className="converting-overlay-portal"
-      style={{ '--overlay-card-width': `${Math.min(panelWidth, 360)}px` } as CSSProperties}
+      style={{ '--overlay-card-width': `${Math.min(panelWidth, OVERLAY_PROGRESS_CARD_MAX_WIDTH)}px` } as CSSProperties}
       aria-hidden={false}
     >
       <div className="converting-overlay-portal__card">

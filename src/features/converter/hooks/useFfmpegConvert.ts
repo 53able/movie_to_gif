@@ -7,10 +7,57 @@ import {
 import {
   buildGifConvertPlan,
   formatFfmpegError,
+  type GifConvertMode,
+  type GifConvertPlan,
 } from '../lib/buildGifConvertPlan'
 import { acquireFfmpeg, resetFfmpegWorkFiles } from '../lib/ffmpegRuntime'
 import { probeVideoMeta } from '../lib/probeVideoMeta'
 import type { ConvertParams, ConvertSuccess, Dither } from '../types'
+
+/** 結果 GIF の blob URL を破棄して state をクリアする */
+const clearGifResult = (current: ConvertSuccess | null): null => {
+  if (current?.gifUrl) URL.revokeObjectURL(current.gifUrl)
+  return null
+}
+
+/** single-pass では最初から encoding、two-pass では palette から進捗を報告する */
+const initialFfmpegProgressPhase = (
+  mode: GifConvertMode,
+): 'palette' | 'encoding' =>
+  mode === 'single-pass' ? 'encoding' : 'palette'
+
+/** MEMFS から output.gif を読み、表示用 blob URL を生成する */
+const readGifOutput = (ffmpegInstance: {
+  FS: (command: 'readFile', path: string) => Uint8Array
+}): ConvertSuccess => {
+  const outputData = ffmpegInstance.FS('readFile', 'output.gif')
+  const gifBytes = new Uint8Array(outputData.length)
+  gifBytes.set(outputData)
+  const gifUrl = URL.createObjectURL(new Blob([gifBytes], { type: 'image/gif' }))
+  return { gifUrl, gifSize: gifBytes.byteLength }
+}
+
+/** plan に従って ffmpeg.run を実行し GIF バイト列を返す */
+const runGifConversion = async (
+  ffmpegInstance: Awaited<ReturnType<typeof acquireFfmpeg>>,
+  plan: GifConvertPlan,
+  onPassProgress: (phase: 'palette' | 'encoding', ratio: number) => void,
+): Promise<ConvertSuccess> => {
+  const reportPassProgress = (phase: 'palette' | 'encoding') =>
+    ({ ratio }: { ratio: number }): void => {
+      onPassProgress(phase, ratio)
+    }
+
+  ffmpegInstance.setProgress(reportPassProgress(initialFfmpegProgressPhase(plan.mode)))
+
+  if (plan.palettePass) {
+    await ffmpegInstance.run(...plan.palettePass.args)
+    ffmpegInstance.setProgress(reportPassProgress('encoding'))
+  }
+
+  await ffmpegInstance.run(...plan.gifPass.args)
+  return readGifOutput(ffmpegInstance)
+}
 
 export type FfmpegConvertState = {
   readonly converting: boolean
@@ -50,10 +97,7 @@ export const useFfmpegConvert = (): FfmpegConvertState => {
   )
 
   const resetResult = useCallback((): void => {
-    setResult((current) => {
-      if (current?.gifUrl) URL.revokeObjectURL(current.gifUrl)
-      return null
-    })
+    setResult(clearGifResult)
     setError(null)
     setProgress(0)
     setProgressLabel('')
@@ -62,10 +106,7 @@ export const useFfmpegConvert = (): FfmpegConvertState => {
   const convert = useCallback(async (params: ConvertParams): Promise<void> => {
     setConverting(true)
     setError(null)
-    setResult((current) => {
-      if (current?.gifUrl) URL.revokeObjectURL(current.gifUrl)
-      return null
-    })
+    setResult(clearGifResult)
 
     try {
       const meta = await probeVideoMeta(params.videoUrl)
@@ -77,28 +118,14 @@ export const useFfmpegConvert = (): FfmpegConvertState => {
       applyProgress('writing', plan.mode)
       ffmpegInstance.FS('writeFile', 'input.mp4', params.videoData)
 
-      const reportPassProgress = (phase: 'palette' | 'encoding') =>
-        ({ ratio }: { ratio: number }): void => {
-          applyProgress(phase, plan.mode, ratio)
-        }
+      const conversionResult = await runGifConversion(
+        ffmpegInstance,
+        plan,
+        (phase, ratio) => applyProgress(phase, plan.mode, ratio),
+      )
 
-      ffmpegInstance.setProgress(reportPassProgress(
-        plan.mode === 'single-pass' ? 'encoding' : 'palette',
-      ))
-
-      if (plan.palettePass) {
-        await ffmpegInstance.run(...plan.palettePass.args)
-        ffmpegInstance.setProgress(reportPassProgress('encoding'))
-      }
-
-      await ffmpegInstance.run(...plan.gifPass.args)
       applyProgress('finishing', plan.mode)
-
-      const outputData = ffmpegInstance.FS('readFile', 'output.gif') as Uint8Array
-      const gifBytes = new Uint8Array(outputData.length)
-      gifBytes.set(outputData)
-      const gifUrl = URL.createObjectURL(new Blob([gifBytes], { type: 'image/gif' }))
-      setResult({ gifUrl, gifSize: gifBytes.byteLength })
+      setResult(conversionResult)
       setProgress(100)
       setProgressLabel(convertProgressLabel('finishing'))
     } catch (caught) {
