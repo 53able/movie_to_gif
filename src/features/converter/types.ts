@@ -17,8 +17,13 @@ export const resultPanelStateSchema = z.enum(['idle', 'success', 'error'])
 
 export type ResultPanelState = z.infer<typeof resultPanelStateSchema>
 
-/** Liquid DOM 利用可否の判定状態 */
-export const liquidGateStatusSchema = z.enum(['checking', 'supported', 'unsupported'])
+/** Liquid ゲートの判定状態（checking 中は UI ルート未確定） */
+export const liquidGateStatusSchema = z.enum([
+  'checking',
+  'ready-liquid',
+  'ready-flat',
+  'unsupported',
+])
 
 export type LiquidGateStatus = z.infer<typeof liquidGateStatusSchema>
 
