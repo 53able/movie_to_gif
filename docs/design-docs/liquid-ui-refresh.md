@@ -7,15 +7,16 @@ movie_to_gif の UI を [Liquid DOM](https://53able.github.io/docs-site/docs/liq
 ## 非目標（v1）
 
 - ドラッグ＆ドロップによるファイル選択
-- WebGPU 非対応ブラウザ向けフォールバック UI
+- ~~WebGPU 非対応ブラウザ向けフォールバック UI~~ → **FlatScene** で Html 非対応時に CSS UI を提供（ADR-0003）
 - Three.js / R3F 統合
 
 ## 実行要件
 
 | 要件 | 詳細 |
 |------|------|
-| WebGPU | `navigator.gpu` 必須。非対応時は説明画面のみ |
-| HTML-in-Canvas | `Html` ノード利用のため Chrome + `chrome://flags/#canvas-draw-element` ON |
+| WebGPU + HTML-in-Canvas | 両方利用可 → **ConverterScene**（Liquid UI） |
+| HTML-in-Canvas 不可 | **FlatScene**（CSS ガラス UI）。WebGPU 単体不足も Flat へ |
+| WebAssembly | FFmpeg.wasm 実行に必須。欠如時のみ Unsupported |
 | React | React 19（`@liquid-dom/react` peer 想定） |
 
 ## シーングラフ
@@ -81,12 +82,37 @@ flowchart TB
 ```mermaid
 stateDiagram-v2
   [*] --> GateCheck
-  GateCheck --> Unsupported: WebGPU or Html API 不可
-  GateCheck --> Ready: 要件充足
+  GateCheck --> Unsupported: WASM 不可 or チェック失敗
+  GateCheck --> LiquidReady: WebGPU and Html API OK
+  GateCheck --> FlatReady: Html API 不可 or WebGPU 不可
   Unsupported --> [*]
-  Ready --> Converting: 変換開始
-  Converting --> Ready: 完了 or 失敗
+  LiquidReady --> Converting: 変換開始
+  FlatReady --> Converting: 変換開始
+  Converting --> LiquidReady: 完了 or 失敗
+  Converting --> FlatReady: 完了 or 失敗
 ```
+
+### Flat フォールバック（ADR-0003）
+
+iOS Safari 26 など **WebGPU は使えるが HTML-in-Canvas が無い** 環境向け。
+
+```mermaid
+flowchart TB
+  FS[FlatScene 全画面]
+  BD2[Backdrop video 要素]
+  FP[FlatPanelStack CSS ガラス]
+  OV2[変換中 DOM オーバーレイ]
+
+  FS --> BD2
+  FS --> FP
+  FS -. converting .-> OV2
+
+  FP --> CP4[ConvertPanelContent]
+  FP --> RP4[ResultPanelContent]
+```
+
+- Liquid の `Glass` / `Html` の代わりに `flat-glass-panel` + 既存 `panel-html` クラスを再利用
+- 変換 hooks（`useFfmpegConvert` / `useVideoBackdrop` / `useLayoutMedia`）は Liquid と共通
 
 ### 結果パネル
 
@@ -126,15 +152,19 @@ stateDiagram-v2
 src/
 ├── main.tsx
 ├── app/
-│   ├── App.tsx                 # LiquidGate 分岐
-│   └── UnsupportedScreen.tsx   # 要件説明
+│   ├── App.tsx                 # Liquid / Flat ゲート分岐
+│   └── UnsupportedScreen.tsx   # 変換不能時の説明
 ├── features/converter/
 │   ├── hooks/
-│   │   ├── useLiquidGate.ts    # WebGPU + Html API 判定
+│   │   ├── useLiquidGate.ts    # WebGPU + Html API → ルート判定
 │   │   ├── useVideoBackdrop.ts # 先頭フレーム抽出
 │   │   └── useFfmpegConvert.ts # 変換・progress・error
+│   ├── lib/
+│   │   └── resolveLiquidGate.ts
 │   ├── ui/
 │   │   ├── ConverterScene.tsx  # LiquidCanvas ルート
+│   │   ├── FlatScene.tsx       # CSS フォールバック
+│   │   ├── ConvertPanelContent.tsx
 │   │   ├── ConvertPanel.tsx
 │   │   ├── ResultPanel.tsx
 │   │   └── ConvertingOverlay.tsx
@@ -173,4 +203,5 @@ Vue SFC を一括削除し React 19 + Liquid DOM に置換（1 PR）。中間的
 
 - [Liquid DOM ドキュメント](https://53able.github.io/docs-site/docs/liquid-dom.html)
 - ADR: `docs/adr/0001-vue-react-liquid.md`
-- ADR: `docs/adr/0002-webgpu-required.md`
+- ADR: `docs/adr/0002-webgpu-required.md`（Liquid 描画条件）
+- ADR: `docs/adr/0003-flat-fallback-ui.md`（Flat フォールバック）
